@@ -40,6 +40,9 @@ export let datasets: {[key: string]: dataset.DataGenerator} = {
   "xor": dataset.classifyXORData,
   "gauss": dataset.classifyTwoGaussData,
   "spiral": dataset.classifySpiralData,
+  "aqa": dataset.classifyAqaLogo,
+  "abc": dataset.classifyAbcXyz,
+  "sqtri": dataset.classifySquareTriangle,
 };
 
 /** A map between dataset names and functions that generate regression data. */
@@ -115,6 +118,7 @@ export class State {
     {name: "networkShape", type: Type.ARRAY_NUMBER},
     {name: "seed", type: Type.STRING},
     {name: "showTestData", type: Type.BOOLEAN},
+    {name: "showTrainData", type: Type.BOOLEAN},
     {name: "discretize", type: Type.BOOLEAN},
     {name: "percTrainData", type: Type.NUMBER},
     {name: "x", type: Type.BOOLEAN},
@@ -137,6 +141,7 @@ export class State {
   learningRate = 0.03;
   regularizationRate = 0;
   showTestData = false;
+  showTrainData = true;
   noise = 0;
   batchSize = 10;
   discretize = false;

@@ -68,7 +68,7 @@ export class HeatMap {
     // Get a range of colors.
     let tmpScale = d3.scale.linear<string, number>()
         .domain([0, .5, 1])
-        .range(["#f59322", "#e8eaeb", "#0877bd"])
+        .range(["#C8194B", "#e8eaeb", "#371376"])
         .clamp(true);
     // Due to numerical error, we need to specify
     // d3.range(0, end + small_epsilon, step)
@@ -115,23 +115,29 @@ export class HeatMap {
     }
 
     if (this.settings.showAxes) {
+      // Axes are kept for padding/layout, but rendered without tick marks,
+      // numeric labels, or the axis line so the visualization stays clean.
       let xAxis = d3.svg.axis()
         .scale(this.xScale)
-        .orient("bottom");
+        .orient("bottom")
+        .tickValues([]);
 
       let yAxis = d3.svg.axis()
         .scale(this.yScale)
-        .orient("right");
+        .orient("right")
+        .tickValues([]);
 
       this.svg.append("g")
         .attr("class", "x axis")
         .attr("transform", `translate(0,${height - 2 * padding})`)
-        .call(xAxis);
+        .call(xAxis)
+        .select(".domain").remove();
 
       this.svg.append("g")
         .attr("class", "y axis")
         .attr("transform", "translate(" + (width - 2 * padding) + ",0)")
-        .call(yAxis);
+        .call(yAxis)
+        .select(".domain").remove();
     }
   }
 

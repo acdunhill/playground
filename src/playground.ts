@@ -49,7 +49,7 @@ function scrollTween(offset) {
 
 const RECT_SIZE = 30;
 const BIAS_SIZE = 5;
-const NUM_SAMPLES_CLASSIFY = 500;
+const NUM_SAMPLES_CLASSIFY = 3000;
 const NUM_SAMPLES_REGRESS = 1200;
 const DENSITY = 100;
 
@@ -75,6 +75,7 @@ let INPUTS: {[name: string]: InputFeature} = {
 let HIDABLE_CONTROLS = [
   ["Show test data", "showTestData"],
   ["Discretize output", "discretize"],
+  ["Show training data", "showTrainData"],
   ["Play button", "playButton"],
   ["Step button", "stepButton"],
   ["Reset button", "resetButton"],
@@ -89,6 +90,58 @@ let HIDABLE_CONTROLS = [
   ["Batch size", "batchSize"],
   ["# of hidden layers", "numHiddenLayers"],
 ];
+
+/**
+ * Per-dataset preset configurations. Selecting a dataset that has a preset
+ * auto-configures the inputs, hidden layers, activation, learning rate and
+ * regularization to a setup that reliably converges - handy for live demos.
+ */
+interface DatasetPreset {
+  inputs: string[];
+  networkShape: number[];
+  activation: string;
+  learningRate: number;
+  regularization: string;
+  regularizationRate: number;
+  discretize: boolean;
+}
+
+let DATASET_PRESETS: {[datasetKey: string]: DatasetPreset} = {
+  // Hierarchical-features demo: raw x,y inputs, so layer 1 learns line/edge
+  // detectors that combine into a "square" and a "triangle" detector in the
+  // 2-node layer 2. Tanh for smooth, readable node thumbnails and hover
+  // overlays; discretize off so those overlays show the activation gradient.
+  // L2 regularization keeps convergence clean and stable across inits.
+  "sqtri": {inputs: ["x", "y"], networkShape: [8, 2],
+      activation: "tanh", learningRate: 0.03,
+      regularization: "L2", regularizationRate: 0.003,
+      discretize: false},
+};
+
+/** Applies a dataset preset to the state and syncs the affected UI controls. */
+function applyDatasetPreset(preset: DatasetPreset) {
+  // Enable exactly the preset's input features, disable the rest.
+  for (let inputName in INPUTS) {
+    state[inputName] = preset.inputs.indexOf(inputName) !== -1;
+  }
+  // Hidden-layer shape.
+  state.networkShape = preset.networkShape.slice();
+  state.numHiddenLayers = state.networkShape.length;
+  // Activation.
+  state.activation = activations[preset.activation];
+  d3.select("#activations").property("value", preset.activation);
+  // Learning rate.
+  state.learningRate = preset.learningRate;
+  d3.select("#learningRate").property("value", preset.learningRate);
+  // Regularization (function and rate).
+  state.regularization = regularizations[preset.regularization];
+  d3.select("#regularizations").property("value", preset.regularization);
+  state.regularizationRate = preset.regularizationRate;
+  d3.select("#regularRate").property("value", preset.regularizationRate);
+  // Discretize output.
+  state.discretize = preset.discretize;
+  d3.select("#discretize").property("checked", preset.discretize);
+}
 
 class Player {
   private timerIndex = 0;
@@ -155,7 +208,7 @@ let selectedNodeId: string = null;
 // Plot the heatmap.
 let xDomain: [number, number] = [-6, 6];
 let heatMap =
-    new HeatMap(300, DENSITY, xDomain, xDomain, d3.select("#heatmap"),
+    new HeatMap(400, DENSITY, xDomain, xDomain, d3.select("#heatmap"),
         {showAxes: true});
 let linkWidthScale = d3.scale.linear()
   .domain([0, 5])
@@ -163,7 +216,7 @@ let linkWidthScale = d3.scale.linear()
   .clamp(true);
 let colorScale = d3.scale.linear<string, number>()
                      .domain([-1, 0, 1])
-                     .range(["#f59322", "#e8eaeb", "#0877bd"])
+                     .range(["#C8194B", "#e8eaeb", "#371376"])
                      .clamp(true);
 let iter = 0;
 let trainData: Example2D[] = [];
@@ -215,6 +268,11 @@ function makeGUI() {
     state.dataset =  newDataset;
     dataThumbnails.classed("selected", false);
     d3.select(this).classed("selected", true);
+    // Apply a demo-ready preset if this dataset has one.
+    let preset = DATASET_PRESETS[this.dataset.dataset];
+    if (preset) {
+      applyDatasetPreset(preset);
+    }
     generateData();
     parametersChanged = true;
     reset();
@@ -281,6 +339,15 @@ function makeGUI() {
   });
   // Check/uncheck the checbox according to the current state.
   discretize.property("checked", state.discretize);
+
+  let showTrainData = d3.select("#show-train-data").on("change", function() {
+    state.showTrainData = this.checked;
+    state.serialize();
+    userHasInteracted();
+    heatMap.updatePoints(state.showTrainData ? trainData : []);
+  });
+  // Check/uncheck the checkbox according to the current state.
+  showTrainData.property("checked", state.showTrainData);
 
   let percTrain = d3.select("#percTrainData").on("input", function() {
     state.percTrainData = this.value;
@@ -848,7 +915,29 @@ function getLoss(network: nn.Node[][], dataPoints: Example2D[]): number {
   return loss / dataPoints.length;
 }
 
+/**
+ * Rescales a matrix so its largest-magnitude entry maps to +/-1, but only ever
+ * shrinks - never amplifies. Values already within [-1, 1] (e.g. tanh outputs)
+ * are left untouched, keeping their natural thumbnail; unbounded activations
+ * (e.g. ReLU, which would otherwise saturate against the fixed [-1, 1] color
+ * scale) are scaled down so their pattern stays visible.
+ */
+function rescaleToUnit(matrix: number[][]): number[][] {
+  let max = 0;
+  for (let i = 0; i < matrix.length; i++) {
+    for (let j = 0; j < matrix[i].length; j++) {
+      max = Math.max(max, Math.abs(matrix[i][j]));
+    }
+  }
+  if (max <= 1) {
+    return matrix;
+  }
+  return matrix.map(row => row.map(v => v / max));
+}
+
 function updateUI(firstStep = false) {
+  // Reset button turns red once there's training progress to clear.
+  d3.select("#reset-button").classed("has-progress", iter > 0);
   // Update the links visually.
   updateWeightsUI(network, d3.select("g.core"));
   // Update the bias values visually.
@@ -859,11 +948,13 @@ function updateUI(firstStep = false) {
       selectedNodeId : nn.getOutputNode(network).id;
   heatMap.updateBackground(boundary[selectedId], state.discretize);
 
-  // Update all decision boundaries.
+  // Update all decision boundaries. Each neuron's thumbnail is auto-scaled to
+  // its own output range (and rendered continuously) so the activation pattern
+  // stays visible for any activation function, not just tanh.
   d3.select("#network").selectAll("div.canvas")
       .each(function(data: {heatmap: HeatMap, id: string}) {
-    data.heatmap.updateBackground(reduceMatrix(boundary[data.id], 10),
-        state.discretize);
+    data.heatmap.updateBackground(
+        rescaleToUnit(reduceMatrix(boundary[data.id], 10)), false);
   });
 
   function zeroPad(n: number): string {
@@ -1000,7 +1091,8 @@ function drawDatasetThumbnails() {
     let data = dataGenerator(200, 0);
     data.forEach(function(d) {
       context.fillStyle = colorScale(d.label);
-      context.fillRect(w * (d.x + 6) / 12, h * (d.y + 6) / 12, 4, 4);
+      // Flip y so positive values render at the top, matching the main heatmap.
+      context.fillRect(w * (d.x + 6) / 12, h * (6 - d.y) / 12, 4, 4);
     });
     d3.select(canvas.parentNode).style("display", null);
   }
@@ -1083,7 +1175,7 @@ function generateData(firstTime = false) {
   let splitIndex = Math.floor(data.length * state.percTrainData / 100);
   trainData = data.slice(0, splitIndex);
   testData = data.slice(splitIndex);
-  heatMap.updatePoints(trainData);
+  heatMap.updatePoints(state.showTrainData ? trainData : []);
   heatMap.updateTestPoints(state.showTestData ? testData : []);
 }
 

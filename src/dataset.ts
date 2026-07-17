@@ -207,6 +207,206 @@ export function classifyXORData(numSamples: number, noise: number):
 }
 
 /**
+ * Generates a point cloud shaped like the AQA logo: the letters "AQA" (both
+ * A-glyphs and the Q ring) drawn in the positive (purple) class, with only the
+ * Q's swoosh/tail drawn in the negative (cherry-red) class. Points use the
+ * standard math orientation (positive y up), so it renders upright.
+ */
+export function classifyAqaLogo(numSamples: number, noise: number):
+    Example2D[] {
+  let points: Example2D[] = [];
+  // Per-point jitter: a thin base thickness plus a noise-controlled spread.
+  let jitter = (base: number) => randUniform(-1, 1) * (base + noise * 1.5);
+
+  // Sample a point along a straight stroke from (x0,y0) to (x1,y1).
+  function seg(x0: number, y0: number, x1: number, y1: number,
+      label: number, base = 0.12) {
+    let t = Math.random();
+    points.push({
+      x: x0 + (x1 - x0) * t + jitter(base),
+      y: y0 + (y1 - y0) * t + jitter(base),
+      label
+    });
+  }
+
+  // Sample a point on a circle (the body of the "Q").
+  function arc(cx: number, cy: number, r: number, label: number) {
+    let a = Math.random() * 2 * Math.PI;
+    points.push({
+      x: cx + r * Math.cos(a) + jitter(0.12),
+      y: cy + r * Math.sin(a) + jitter(0.12),
+      label
+    });
+  }
+
+  // Draw one upright "A" glyph centered at cx: two legs and a low crossbar.
+  function drawA(cx: number, count: number, label: number) {
+    let w = 1.5, top = 3.2, bot = -3.2, barY = -0.6;
+    for (let i = 0; i < count; i++) {
+      let p = Math.random();
+      if (p < 0.4) {
+        seg(cx - w, bot, cx, top, label);            // left leg
+      } else if (p < 0.8) {
+        seg(cx + w, bot, cx, top, label);            // right leg
+      } else {
+        seg(cx - w * 0.55, barY, cx + w * 0.55, barY, label);  // crossbar
+      }
+    }
+  }
+
+  // Draw the "Q" ring centered at the origin (purple).
+  function drawQring(count: number, label: number) {
+    for (let i = 0; i < count; i++) {
+      arc(0, 0, 2.7, label);
+    }
+  }
+
+  // Draw the red swoosh: the Q's tail sweeping out to the lower right.
+  function drawSwoosh(count: number, label: number) {
+    for (let i = 0; i < count; i++) {
+      seg(1.3, -1.3, 3.2, -3.4, label, 0.22);
+    }
+  }
+
+  let nRed = Math.floor(numSamples * 0.16);
+  let nPurple = numSamples - nRed;
+  let nA = Math.floor(nPurple * 0.29);
+  let nQ = nPurple - 2 * nA;
+  drawA(-4.2, nA, 1);        // first "A"  (purple)
+  drawQring(nQ, 1);          // "Q" ring   (purple)
+  drawA(4.2, nA, 1);         // second "A" (purple)
+  drawSwoosh(nRed, -1);      // Q swoosh   (cherry red)
+  return points;
+}
+
+/** A line segment, used to describe letter strokes. */
+type Seg = {x0: number, y0: number, x1: number, y1: number};
+
+/** Euclidean distance from point (px,py) to a line segment. */
+function distToSeg(px: number, py: number, s: Seg): number {
+  let dx = s.x1 - s.x0, dy = s.y1 - s.y0;
+  let l2 = dx * dx + dy * dy;
+  let t = l2 ? ((px - s.x0) * dx + (py - s.y0) * dy) / l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  let qx = s.x0 + t * dx, qy = s.y0 + t * dy;
+  return Math.sqrt((px - qx) * (px - qx) + (py - qy) * (py - qy));
+}
+
+/**
+ * Returns the stroke segments for a single character, drawn in a box centered
+ * at (cx,cy) with half-width w and half-height h. Local coords are in [-1,1].
+ */
+function letterStrokes(ch: string, cx: number, cy: number,
+    w: number, h: number): Seg[] {
+  let s = (x0: number, y0: number, x1: number, y1: number): Seg =>
+      ({x0: cx + x0 * w, y0: cy + y0 * h, x1: cx + x1 * w, y1: cy + y1 * h});
+  switch (ch) {
+    case "A": return [s(-1, -1, 0, 1), s(1, -1, 0, 1), s(-0.5, -0.1, 0.5, -0.1)];
+    case "B": return [s(-1, -1, -1, 1), s(-1, 1, 0.4, 1), s(-1, 0, 0.5, 0),
+        s(-1, -1, 0.4, -1), s(0.4, 1, 0.9, 0.5), s(0.9, 0.5, 0.5, 0),
+        s(0.4, -1, 0.9, -0.5), s(0.9, -0.5, 0.5, 0)];
+    case "C": return [s(0.7, 1, -0.5, 1), s(-0.5, 1, -1, 0.4),
+        s(-1, 0.4, -1, -0.4), s(-1, -0.4, -0.5, -1), s(-0.5, -1, 0.7, -1)];
+    case "X": return [s(-1, -1, 1, 1), s(-1, 1, 1, -1)];
+    case "Y": return [s(-1, 1, 0, 0), s(1, 1, 0, 0), s(0, 0, 0, -1)];
+    case "Z": return [s(-1, 1, 1, 1), s(1, 1, -1, -1), s(-1, -1, 1, -1)];
+    default: return [];
+  }
+}
+
+/**
+ * Generates a purple (positive class) background filling the plane, with the
+ * letters "A B C" / "X Y Z" drawn on top in red (negative class). Purple
+ * background points are kept clear of the letters so they stay legible.
+ */
+export function classifyAbcXyz(numSamples: number, noise: number):
+    Example2D[] {
+  let points: Example2D[] = [];
+  let cols = [-3.6, 0, 3.6], w = 1.1, h = 1.5;
+  let layout: [string[], number][] = [
+    [["A", "B", "C"], 2.9],
+    [["X", "Y", "Z"], -2.9]
+  ];
+
+  // Collect all letter stroke segments.
+  let segs: Seg[] = [];
+  layout.forEach(([chars, cy]) => {
+    chars.forEach((ch, i) => {
+      segs = segs.concat(letterStrokes(ch, cols[i], cy, w, h));
+    });
+  });
+
+  // Red letter points, distributed along the strokes by length.
+  let lens = segs.map(s =>
+      Math.sqrt((s.x1 - s.x0) * (s.x1 - s.x0) + (s.y1 - s.y0) * (s.y1 - s.y0)));
+  let total = lens.reduce((a, b) => a + b, 0);
+  let jitter = () => randUniform(-1, 1) * (0.09 + noise * 1.2);
+  let nRed = Math.floor(numSamples * 0.5);
+  for (let i = 0; i < nRed; i++) {
+    let r = Math.random() * total, k = 0;
+    while (r > lens[k] && k < segs.length - 1) { r -= lens[k]; k++; }
+    let s = segs[k], t = Math.random();
+    points.push({
+      x: s.x0 + (s.x1 - s.x0) * t + jitter(),
+      y: s.y0 + (s.y1 - s.y0) * t + jitter(),
+      label: -1
+    });
+  }
+
+  // Purple background points, rejection-sampled away from the letters.
+  let nPurple = numSamples - nRed, placed = 0, guard = 0;
+  let margin = 0.55;
+  while (placed < nPurple && guard < nPurple * 40) {
+    guard++;
+    let x = randUniform(-6, 6), y = randUniform(-6, 6);
+    let near = segs.some(s => distToSeg(x, y, s) < margin);
+    if (near) { continue; }
+    points.push({x, y, label: 1});
+    placed++;
+  }
+  return points;
+}
+
+/**
+ * A "square with a triangular hole": the red (negative) class is the region
+ * inside the square but outside the triangle; everything else is purple
+ * (positive). Built as a hierarchical-features demo - a small network learns
+ * line detectors (layer 1), which combine into a "square" detector and a
+ * "triangle" detector (layer 2), which the output combines into "square
+ * AND-NOT triangle".
+ */
+export function classifySquareTriangle(numSamples: number,
+    noise: number): Example2D[] {
+  let points: Example2D[] = [];
+  let sq = 3.9;                                   // square half-size
+  let v = [[0, 2.8], [-2.8, -2.2], [2.8, -2.2]];  // triangle vertices
+
+  let edgeSign = (px: number, py: number, ax: number, ay: number,
+      bx: number, by: number) => (px - bx) * (ay - by) - (ax - bx) * (py - by);
+  let inTriangle = (x: number, y: number) => {
+    let d1 = edgeSign(x, y, v[0][0], v[0][1], v[1][0], v[1][1]);
+    let d2 = edgeSign(x, y, v[1][0], v[1][1], v[2][0], v[2][1]);
+    let d3 = edgeSign(x, y, v[2][0], v[2][1], v[0][0], v[0][1]);
+    let hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+    let hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+    return !(hasNeg && hasPos);
+  };
+  let inSquare = (x: number, y: number) =>
+      Math.abs(x) < sq && Math.abs(y) < sq;
+
+  // Use a denser fill than other datasets so the two shapes read clearly.
+  let n = numSamples * 2;
+  for (let i = 0; i < n; i++) {
+    let x = randUniform(-6, 6), y = randUniform(-6, 6);
+    // Noise perturbs the point used for labeling, fuzzing the boundary.
+    let nx = x + randUniform(-5, 5) * noise, ny = y + randUniform(-5, 5) * noise;
+    let label = (inSquare(nx, ny) && !inTriangle(nx, ny)) ? -1 : 1;
+    points.push({x, y, label});
+  }
+  return points;
+}
+
+/**
  * Returns a sample from a uniform [a, b] distribution.
  * Uses the seedrandom library as the random generator.
  */
