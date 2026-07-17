@@ -18,6 +18,12 @@ This will start an http server and automatically re-compile the TypeScript,
 HTML and CSS files whenever they change.
 
 ## For owners
-To push to production: `git subtree push --prefix dist origin gh-pages`.
+To deploy the current code to GitHub Pages (https://acdunhill.github.io/playground/):
+
+    npm run deploy
+
+This builds the site into `dist/` and publishes it to the `gh-pages` branch
+(using the `gh-pages` package). `dist/` is gitignored, so it is never committed
+to `master` — the build output only lives on `gh-pages`.
 
 This is not an official Google product.
