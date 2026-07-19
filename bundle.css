@@ -216,10 +216,31 @@ header {
 
 header h1 {
   font-size: 30px;
-  text-align: center;
+  text-align: left;
   margin-top: 14px;
   margin-bottom: 14px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Left-aligned title sitting next to a red parallelogram "swoosh" that bleeds
+   in from the window's left edge. skewY slants the top/bottom edges to 41deg
+   from horizontal while keeping the left and right (terminus) edges vertical. */
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-swoosh {
+  flex: none;
+  width: 54px;
+  height: 22px;
+  margin-right: 8px;
+  background-color: #C8194B;
+  /* Long enough that the lower (window-side) vertical edge runs entirely below
+     the header bottom (clipped), so only the two slanted edges meet the bottom
+     border. translateY keeps the terminus bottom just above the text baseline. */
+  transform: translateY(28px) skewY(-41deg);
 }
 
 header h1 .optional {
@@ -244,6 +265,12 @@ header h1 .optional {
     font-size: 34px;
     margin-top: 20px;
     margin-bottom: 20px;
+  }
+  .header-swoosh {
+    width: 72px;
+    height: 28px;
+    margin-right: 9px;
+    transform: translateY(35px) skewY(-41deg);
   }
 }
 
